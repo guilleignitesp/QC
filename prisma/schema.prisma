@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Escuela {
+  id      String  @id @default(uuid())
+  nombre  String
+  clases  Clase[]
+}
+
+model Asignatura {
+  id      String  @id @default(uuid())
+  nombre  String
+  clases  Clase[]
+}
+
+model Profesor {
+  id           String               @id @default(uuid())
+  nombre       String
+  activo       Boolean              @default(true)
+  clasesBase   Clase[]              @relation("ProfesoresBase")
+  asignaciones AsignacionProfesor[]
+  cambiosSalientes RegistroCambio[]     @relation("CambiosSaliente")
+  cambiosEntrantes RegistroCambio[]     @relation("CambiosEntrante")
+}
+
+model Clase {
+  id                String   @id @default(uuid())
+  escuelaId         String
+  asignaturaId      String
+  diaSemana         Int
+  horaInicio        DateTime
+  horaFin           DateTime
+  profesoresMinimos Int      @default(1)
+  edad              String?
+
+  escuela        Escuela       @relation(fields: [escuelaId], references: [id])
+  asignatura     Asignatura    @relation(fields: [asignaturaId], references: [id])
+  profesoresBase Profesor[]    @relation("ProfesoresBase")
+  clasesSemana   ClaseSemana[]
+}
+
+model Semana {
+  id           String        @id @default(uuid())
+  fechaInicio  DateTime
+  fechaFin     DateTime
+  activa       Boolean       @default(true)
+  clasesSemana ClaseSemana[]
+}
+
+model ClaseSemana {
+  id       String  @id @default(uuid())
+  claseId  String
+  semanaId String
+  estado   String  @default("NORMAL")
+  notas    String?
+
+  clase                Clase                @relation(fields: [claseId], references: [id])
+  semana               Semana               @relation(fields: [semanaId], references: [id])
+  asignacionesProfesor AsignacionProfesor[]
+  registrosCambio      RegistroCambio[]
+
+  @@unique([claseId, semanaId])
+}
+
+model AsignacionProfesor {
+  id            String  @id @default(uuid())
+  profesorId    String
+  claseSemanaId String
+  tipo          String // PERMANENTE | TEMPORAL
+  origen        String // BASE | SUSTITUCION
+  activo        Boolean @default(true)
+
+  profesor    Profesor    @relation(fields: [profesorId], references: [id])
+  claseSemana ClaseSemana @relation(fields: [claseSemanaId], references: [id])
+}
+
+model RegistroCambio {
+  id                 String   @id @default(uuid())
+  claseSemanaId      String
+  profesorSalienteId String?
+  profesorEntranteId String?
+  fechaCambio        DateTime @default(now())
+  motivo             String?  @default("Sustitución")
+
+  claseSemana      ClaseSemana @relation(fields: [claseSemanaId], references: [id])
+  profesorSaliente Profesor?   @relation("CambiosSaliente", fields: [profesorSalienteId], references: [id])
+  profesorEntrante Profesor?   @relation("CambiosEntrante", fields: [profesorEntranteId], references: [id])
+}
