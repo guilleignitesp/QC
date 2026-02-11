@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { revertIncidentAction } from '@/app/actions/substitution'
-import { Trash2, Loader2, ArrowRight } from 'lucide-react'
+import { Trash2, Loader2, ArrowRight, Settings } from 'lucide-react'
 
 type Props = {
     incidents: any[]
@@ -52,56 +52,81 @@ export default function IncidenciasPanel({ incidents }: Props) {
             <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
                 {incidents.map((inc) => {
                     const isSubstitution = inc.type === 'SUBSTITUTION'
-                    const time = new Date(inc.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    const isStructural = inc.type === 'STRUCTURAL' || (!inc.profesorSaliente && !inc.profesorEntrante)
+                    const displayDate = inc.timestamp || inc.fechaCambio
+                    const time = displayDate ? new Date(displayDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
+
+                    if (!inc.targetClass) return null
 
                     return (
                         <div key={inc.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
-                            <div className="min-w-0 pr-4">
+                            <div className="min-w-0 pr-4 flex-1">
                                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-2">
                                     <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 border border-slate-200">
                                         {inc.targetClass.schoolName}
+                                        {isStructural && ` - ${inc.targetClass.subjectName}`}
                                     </span>
                                     <span className="text-slate-400 font-medium tracking-wide">
                                         {time}
                                     </span>
                                 </div>
 
-                                <div className="text-sm flex items-center flex-wrap gap-2 text-slate-800">
-                                    {/* Saliente */}
-                                    <span className="font-medium text-rose-500 decoration-rose-300 decoration-1 line-through opacity-75">
-                                        {inc.absentTeacher?.nombre}
-                                    </span>
-
-                                    {/* Arrow */}
-                                    <ArrowRight className="w-4 h-4 text-slate-300" />
-
-                                    {/* Entrante */}
-                                    {isSubstitution ? (
-                                        <div className="flex items-center gap-2">
-                                            <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 rounded border border-emerald-100">
-                                                {inc.substituteTeacher?.nombre}
+                                {isStructural ? (
+                                    // STRUCTURAL CHANGE UI
+                                    <div className="flex items-start gap-3 bg-purple-50/50 p-2 rounded-lg border border-purple-100/50">
+                                        <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
+                                            <Settings className="w-4 h-4" />
+                                        </div>
+                                        <div className="flex flex-col">
+                                            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-0.5">
+                                                Cambio de Configuración
+                                            </span>
+                                            <div className="text-sm text-purple-900 font-semibold leading-snug">
+                                                {inc.motivo ? inc.motivo.replace('CONFIG:', '').trim() : 'Ajustes en la plantilla o mínimos'}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    // STANDARD SUBSTITUTION UI
+                                    <>
+                                        <div className="text-sm flex items-center flex-wrap gap-2 text-slate-800">
+                                            {/* Saliente */}
+                                            <span className="font-medium text-rose-500 decoration-rose-300 decoration-1 line-through opacity-75">
+                                                {inc.profesorSaliente?.nombre}
                                             </span>
 
-                                            {/* Origin Info */}
-                                            {inc.originClass ? (
-                                                <span className="text-xs text-slate-400 flex items-center gap-1">
-                                                    (Viene de <span className="font-medium text-slate-500">{inc.originClass.schoolName}</span>)
-                                                </span>
+                                            {/* Arrow */}
+                                            <ArrowRight className="w-4 h-4 text-slate-300" />
+
+                                            {/* Entrante */}
+                                            {isSubstitution ? (
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 rounded border border-emerald-100">
+                                                        {inc.profesorEntrante?.nombre}
+                                                    </span>
+
+                                                    {/* Origin Info */}
+                                                    {inc.originClass ? (
+                                                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                                                            (Viene de <span className="font-medium text-slate-500">{inc.originClass.schoolName}</span>)
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-xs text-emerald-500 font-medium ml-1">
+                                                            (Libre)
+                                                        </span>
+                                                    )}
+                                                </div>
                                             ) : (
-                                                <span className="text-xs text-emerald-500 font-medium ml-1">
-                                                    (Libre)
+                                                <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase tracking-wider">
+                                                    AUSENTE
                                                 </span>
                                             )}
                                         </div>
-                                    ) : (
-                                        <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase tracking-wider">
-                                            AUSENTE
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="text-xs text-slate-400 mt-1 pl-0.5">
-                                    {inc.targetClass.subjectName}
-                                </div>
+                                        <div className="text-xs text-slate-400 mt-1 pl-0.5">
+                                            {inc.targetClass.subjectName}
+                                        </div>
+                                    </>
+                                )}
                             </div>
 
                             <button

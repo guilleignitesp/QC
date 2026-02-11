@@ -47,6 +47,41 @@ export async function getIncidentsAction(semanaId: string) {
     }
 }
 
+import { updateClaseTemplate, getAllTeachers, getAvailableTeachersForTemplate } from '@/services/schedule'
+
+export async function getAllTeachersAction() {
+    try {
+        const teachers = await getAllTeachers()
+        return { success: true, data: teachers }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function getTemplateCandidatesAction(claseId: string) {
+    try {
+        const candidates = await getAvailableTeachersForTemplate(claseId)
+        return { success: true, data: candidates }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
+export async function updateTemplateAction(
+    claseId: string,
+    minProfesores: number,
+    profesoresBaseIds: string[],
+    claseSemanaId?: string
+) {
+    try {
+        await updateClaseTemplate(claseId, minProfesores, profesoresBaseIds, claseSemanaId)
+        revalidatePath('/dashboard')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 export async function revertIncidentAction(registroId: string) {
     try {
         await revertChange(registroId)

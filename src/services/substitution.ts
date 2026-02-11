@@ -466,12 +466,13 @@ export async function getWeeklyIncidents(semanaId: string) {
                     subjectName: inc.claseSemana.clase.asignatura.nombre,
                     time: inc.claseSemana.clase.horaInicio
                 },
-                absentTeacher: inc.profesorSaliente,
-                substituteTeacher: inc.profesorEntrante,
+                profesorSaliente: inc.profesorSaliente,
+                profesorEntrante: inc.profesorEntrante,
                 originClass: movementRecord ? {
                     schoolName: movementRecord.claseSemana.clase.escuela.nombre,
                     subjectName: movementRecord.claseSemana.clase.asignatura.nombre
-                } : null
+                } : null,
+                fechaCambio: inc.fechaCambio
             })
 
             handledIds.add(inc.id)
@@ -487,19 +488,32 @@ export async function getWeeklyIncidents(semanaId: string) {
                     subjectName: inc.claseSemana.clase.asignatura.nombre,
                     time: inc.claseSemana.clase.horaInicio
                 },
-                absentTeacher: inc.profesorSaliente,
-                substituteTeacher: null,
+                profesorSaliente: inc.profesorSaliente,
+                profesorEntrante: null,
+                originClass: null,
+                fechaCambio: inc.fechaCambio
+            })
+            handledIds.add(inc.id)
+        }
+        // Structural Changes (Config updates)
+        else if (!inc.profesorSalienteId && !inc.profesorEntranteId) {
+            consolidatedIncidents.push({
+                id: inc.id,
+                type: 'STRUCTURAL',
+                timestamp: inc.fechaCambio, // Use log time
+                targetClass: {
+                    schoolName: inc.claseSemana.clase.escuela.nombre,
+                    subjectName: inc.claseSemana.clase.asignatura.nombre,
+                    time: inc.claseSemana.clase.horaInicio
+                },
+                motivo: inc.motivo,
+                fechaCambio: inc.fechaCambio,
+                profesorSaliente: null,
+                profesorEntrante: null,
                 originClass: null
             })
             handledIds.add(inc.id)
         }
-        // Orphaned Movements (should be rare if logic is good, or if listed before sub)
-        // If we process in order, we might miss them if they appear *before* the sub?
-        // We ordered by date desc. 
-        // If we want to capture them, we can just skip for now and rely on the Sub finding them.
-        // If they are truly orphan (no sub), maybe we should show them?
-        // For now, let's look for orphans at the end of loop? 
-        // Or simpler: iterate, if "Movido", distinct check.
     }
 
     return consolidatedIncidents
