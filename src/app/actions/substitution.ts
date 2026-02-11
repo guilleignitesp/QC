@@ -36,6 +36,32 @@ export async function applySubstitutionAction(
     }
 }
 
+import { applyReinforcement } from '@/services/substitution'
+
+export async function applyReinforcementAction(
+    claseSemanaId: string,
+    teacherId: string
+) {
+    try {
+        await applyReinforcement(claseSemanaId, teacherId)
+        revalidatePath('/dashboard')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Error applying reinforcement:', error)
+        return { success: false, error: error.message }
+    }
+}
+
+export async function getAvailableTeachersForRefuerzoAction(claseSemanaId: string) {
+    try {
+        // Call without absentTeacherId to get all available candidates
+        const candidates = await getSubstitutionCandidates(claseSemanaId)
+        return { success: true, data: candidates }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}
+
 import { markTeacherAsAbsent } from '@/services/substitution'
 
 export async function markStandaloneAbsenceAction(

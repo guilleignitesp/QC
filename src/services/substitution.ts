@@ -30,7 +30,7 @@ function doTimesOverlap(startA: Date, endA: Date, startB: Date, endB: Date) {
 
 export async function getSubstitutionCandidates(
     claseSemanaId: string,
-    absentTeacherId: string
+    absentTeacherId?: string
 ): Promise<SubstitutionCandidates> {
 
     // 1. Get Target Class Details
@@ -164,8 +164,8 @@ export async function getSubstitutionCandidates(
     }
 
     allTeachers.forEach(teacher => {
-        // Exclude the absent teacher themselves from the list
-        if (teacher.id === absentTeacherId) return
+        // Exclude the absent teacher themselves from the list (if applicable)
+        if (absentTeacherId && teacher.id === absentTeacherId) return
 
         const myClasses = teacherClassesMap.get(teacher.id) || []
 
@@ -759,6 +759,120 @@ export async function markTeacherAsAbsent(
                 profesorSalienteId: profesorId,
                 profesorEntranteId: null,
                 motivo: 'Ausencia sin sustitución',
+                fechaCambio: new Date()
+            }
+        })
+
+        return { success: true }
+    })
+}
+
+export async function applyReinforcement(
+    claseSemanaId: string,
+    teacherId: string
+) {
+    return await db.$transaction(async (tx) => {
+        // 1. Check for conflicts (Smart Move logic)
+        // Find if teacher has an active class at the same time to pull them from there
+        const targetClass = await tx.claseSemana.findUnique({
+            where: { id: claseSemanaId },
+            include: { clase: true }
+        })
+        if (!targetClass) throw new Error("Target class not found")
+
+        // Helper for time math
+        const getMins = (d: Date) => {
+            const date = new Date(d)
+            return date.getUTCHours() * 60 + date.getUTCMinutes()
+        }
+        const startTarget = getMins(targetClass.clase.horaInicio)
+        const endTarget = getMins(targetClass.clase.horaFin)
+
+        // Find ALL classes this teacher might be in (Base OR Assigned)
+        // We look for ClassSemanas in the same week/day where they are Base OR have an assignment
+        const potentialConflicts = await tx.claseSemana.findMany({
+            where: {
+                semanaId: targetClass.semanaId,
+                clase: {
+                    diaSemana: targetClass.clase.diaSemana
+                },
+                OR: [
+                    { clase: { profesoresBase: { some: { id: teacherId } } } },
+                    { asignacionesProfesor: { some: { profesorId: teacherId, activo: true } } }
+                ]
+            },
+            include: {
+                clase: { include: { asignatura: true } },
+                asignacionesProfesor: true
+            }
+        })
+
+        for (const cs of potentialConflicts) {
+            // Check Time Overlap
+            const startAssign = getMins(cs.clase.horaInicio)
+            const endAssign = getMins(cs.clase.horaFin)
+
+            if (Math.max(startTarget, startAssign) < Math.min(endTarget, endAssign)) {
+                // It's a collision. Ensure they are actually active in this class.
+                const isMarkedAbsent = cs.asignacionesProfesor.some(ap =>
+                    ap.profesorId === teacherId && ap.origen === 'BASE' && !ap.activo
+                )
+
+                if (!isMarkedAbsent) {
+                    // They are active here! We must pull them out.
+                    // Upsert "Moved" Exception
+                    const existing = cs.asignacionesProfesor.find(ap => ap.profesorId === teacherId)
+
+                    if (existing) {
+                        await tx.asignacionProfesor.update({
+                            where: { id: existing.id },
+                            data: { activo: false }
+                        })
+                    } else {
+                        // They were Base with no record => Create Exception
+                        await tx.asignacionProfesor.create({
+                            data: {
+                                claseSemanaId: cs.id,
+                                profesorId: teacherId,
+                                tipo: 'PERMANENTE',
+                                origen: 'BASE',
+                                activo: false
+                            }
+                        })
+                    }
+
+                    // Log the movement
+                    await tx.registroCambio.create({
+                        data: {
+                            claseSemanaId: cs.id,
+                            profesorSalienteId: teacherId,
+                            profesorEntranteId: null,
+                            motivo: `Movido a Refuerzo en ${targetClass.clase.asignatura.nombre}`,
+                            fechaCambio: new Date()
+                        }
+                    })
+                }
+            }
+        }
+
+        // 2. Create Reinforcement Assignment
+        await tx.asignacionProfesor.create({
+            data: {
+                claseSemanaId,
+                profesorId: teacherId,
+                tipo: 'TEMPORAL',
+                origen: 'REFUERZO',
+                activo: true
+            }
+        })
+
+        // 3. Log Incident
+        await tx.registroCambio.create({
+            data: {
+                claseSemanaId,
+                profesorSalienteId: null,
+                profesorEntranteId: teacherId,
+                motivo: 'Refuerzo puntual',
                 fechaCambio: new Date()
             }
         })

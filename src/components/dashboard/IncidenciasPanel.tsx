@@ -52,6 +52,7 @@ export default function IncidenciasPanel({ incidents }: Props) {
             <div className="divide-y divide-slate-100 max-h-[400px] overflow-y-auto">
                 {incidents.map((inc) => {
                     const isSubstitution = inc.type === 'SUBSTITUTION'
+                    const isRefuerzo = !inc.profesorSaliente && inc.profesorEntrante
                     const isStructural = inc.type === 'STRUCTURAL' || (!inc.profesorSaliente && !inc.profesorEntrante)
                     const displayDate = inc.timestamp || inc.fechaCambio
                     const time = displayDate ? new Date(displayDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
@@ -120,22 +121,30 @@ export default function IncidenciasPanel({ incidents }: Props) {
                                         </div>
                                     </div>
                                 ) : (
-                                    // STANDARD SUBSTITUTION UI
+                                    // STANDARD SUBSTITUTION / REFUERZO UI
                                     <>
                                         <div className="text-sm flex items-center flex-wrap gap-2 text-slate-800">
-                                            {/* Saliente */}
-                                            <span className="font-medium text-rose-500 decoration-rose-300 decoration-1 line-through opacity-75">
-                                                {inc.profesorSaliente?.nombre}
-                                            </span>
+                                            {/* Saliente (Only if NOT refuerzo) */}
+                                            {inc.profesorSaliente ? (
+                                                <span className="font-medium text-rose-500 decoration-rose-300 decoration-1 line-through opacity-75">
+                                                    {inc.profesorSaliente.nombre}
+                                                </span>
+                                            ) : (
+                                                isRefuerzo && (
+                                                    <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full text-xs border border-emerald-100 uppercase tracking-wider">
+                                                        REFUERZO
+                                                    </span>
+                                                )
+                                            )}
 
                                             {/* Arrow */}
                                             <ArrowRight className="w-4 h-4 text-slate-300" />
 
                                             {/* Entrante */}
-                                            {isSubstitution ? (
+                                            {inc.profesorEntrante ? (
                                                 <div className="flex items-center gap-2">
                                                     <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 rounded border border-emerald-100">
-                                                        {inc.profesorEntrante?.nombre}
+                                                        {inc.profesorEntrante.nombre}
                                                     </span>
 
                                                     {/* Origin Info */}

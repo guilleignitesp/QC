@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getCandidatesAction, applySubstitutionAction, updateTemplateAction, getAllTeachersAction, getTemplateCandidatesAction, markStandaloneAbsenceAction } from '@/app/actions/substitution'
+import { getCandidatesAction, applySubstitutionAction, updateTemplateAction, getAllTeachersAction, getTemplateCandidatesAction, markStandaloneAbsenceAction, applyReinforcementAction, getAvailableTeachersForRefuerzoAction } from '@/app/actions/substitution'
 import { X, User, AlertCircle, CheckCircle, Loader2, Settings, Users, Save, Clock, UserX } from 'lucide-react'
 
 type Props = {
@@ -124,6 +124,39 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
         }
     }
 
+    // --- REFUERZO HANDLERS ---
+    const handleReinforcementRequest = async () => {
+        setSelectedAbsentId(null) // Ensure no absent teacher is selected
+        setLoading(true)
+        setCandidates(null)
+
+        const res = await getAvailableTeachersForRefuerzoAction(claseSemana.id)
+        if (res.success) {
+            setCandidates(res.data)
+        } else {
+            alert('Error loading candidates')
+        }
+        setLoading(false)
+    }
+
+    const handleApplyReinforcement = async (teacherId: string) => {
+        setProcessing(teacherId)
+        const res = await applyReinforcementAction(claseSemana.id, teacherId)
+
+        if (res.success) {
+            setSuccess(true)
+            setTimeout(() => {
+                onClose()
+                setSuccess(false)
+                setSelectedAbsentId(null)
+                setCandidates(null)
+            }, 1000)
+        } else {
+            alert('Failed: ' + (res.error || 'Unknown error'))
+        }
+        setProcessing(null)
+    }
+
     // --- TEMPLATE HANDLERS ---
     const toggleBaseTeacher = (teacherId: string) => {
         setSelectedBaseIds(prev =>
@@ -182,7 +215,13 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
                                         if (color.includes('amber') && classes.length > 0) {
                                             if (!confirm(`⚠️ ${teacher.nombre} está en ${classes.length} clase(s) crítica(s). ¿Mover de todas formas?`)) return
                                         }
-                                        handleApply(teacher.id)
+
+                                        if (selectedAbsentId) {
+                                            handleApply(teacher.id)
+                                        } else {
+                                            // No absent ID means it's a Reinforcement
+                                            handleApplyReinforcement(teacher.id)
+                                        }
                                     }}
                                     disabled={!!processing || disabled}
                                     className={`flex-shrink-0 px-3 py-1.5 text-white text-xs font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed
@@ -257,6 +296,23 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
                             {/* VIEW: SUSTITUCION */}
                             {activeTab === 'substitution' && (
                                 <div className="animate-in fade-in slide-in-from-left duration-300">
+                                    {/* Option 0: Reinforcement (Add without removal) */}
+                                    <div className="mb-6">
+                                        <button
+                                            onClick={handleReinforcementRequest}
+                                            disabled={loading || !!selectedAbsentId}
+                                            className="w-full py-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-xl border border-emerald-200 flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Users className="w-5 h-5" />
+                                            Añadir Refuerzo Puntual
+                                        </button>
+                                        <p className="text-xs text-center text-slate-400 mt-2 px-4">
+                                            Añade un profesor extra a esta clase sin marcar a nadie como ausente.
+                                        </p>
+                                    </div>
+
+                                    <div className="border-t border-slate-100 my-6"></div>
+
                                     {/* Step 1: Select Absent */}
                                     <div className="mb-8">
                                         <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
