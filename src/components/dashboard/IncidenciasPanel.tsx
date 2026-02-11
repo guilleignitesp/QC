@@ -74,15 +74,48 @@ export default function IncidenciasPanel({ incidents }: Props) {
                                 {isStructural ? (
                                     // STRUCTURAL CHANGE UI
                                     <div className="flex items-start gap-3 bg-purple-50/50 p-2 rounded-lg border border-purple-100/50">
-                                        <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
+                                        <div className="bg-purple-100 p-2 rounded-lg text-purple-600 mt-0.5">
                                             <Settings className="w-4 h-4" />
                                         </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-0.5">
+                                        <div className="flex flex-col flex-1 min-w-0">
+                                            <span className="text-[10px] font-bold text-purple-400 uppercase tracking-widest mb-1">
                                                 Cambio de Configuración
                                             </span>
-                                            <div className="text-sm text-purple-900 font-semibold leading-snug">
-                                                {inc.motivo ? inc.motivo.replace('CONFIG:', '').trim() : 'Ajustes en la plantilla o mínimos'}
+                                            <div className="text-sm space-y-1">
+                                                {inc.motivo && inc.motivo.startsWith('CONFIG:') ? (
+                                                    inc.motivo.replace('CONFIG:', '').split('||').map((part: string, idx: number) => {
+                                                        const text = part.trim()
+                                                        if (text.startsWith('[-]')) {
+                                                            return (
+                                                                <div key={idx} className="text-rose-600 font-medium flex items-center gap-1.5 bg-rose-50/50 px-2 py-0.5 rounded w-fit">
+                                                                    <span className="text-[10px] grid place-content-center w-3 h-3 bg-rose-100 rounded-full font-bold">−</span>
+                                                                    {text.replace('[-]', '').trim()} eliminado/a
+                                                                </div>
+                                                            )
+                                                        }
+                                                        if (text.startsWith('[+]')) {
+                                                            return (
+                                                                <div key={idx} className="text-emerald-600 font-medium flex items-center gap-1.5 bg-emerald-50/50 px-2 py-0.5 rounded w-fit">
+                                                                    <span className="text-[10px] grid place-content-center w-3 h-3 bg-emerald-100 rounded-full font-bold">+</span>
+                                                                    {text.replace('[+]', '').trim()} añadido/a
+                                                                </div>
+                                                            )
+                                                        }
+                                                        if (text.startsWith('[MIN]')) {
+                                                            return (
+                                                                <div key={idx} className="text-purple-900 font-medium flex items-center gap-1.5 bg-purple-100/30 px-2 py-0.5 rounded w-fit">
+                                                                    <span className="text-[10px] text-purple-500 font-bold">MIN</span>
+                                                                    Mínimo de profesores: {text.replace('[MIN]', '').trim()}
+                                                                </div>
+                                                            )
+                                                        }
+                                                        return <div key={idx} className="text-purple-900 font-medium">{text}</div>
+                                                    })
+                                                ) : (
+                                                    <div className="text-purple-900 font-medium">
+                                                        {inc.motivo ? inc.motivo : 'Ajustes en la plantilla o mínimos'}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </div>

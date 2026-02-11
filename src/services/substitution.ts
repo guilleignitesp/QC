@@ -432,8 +432,26 @@ export async function getWeeklyIncidents(semanaId: string) {
     for (const inc of rawIncidents) {
         if (handledIds.has(inc.id)) continue
 
-        // Is it a Substitution? (Has Entrante)
-        if (inc.profesorEntranteId) {
+        // 1. Case: Structural Change (No teachers involved)
+        if (!inc.profesorSalienteId && !inc.profesorEntranteId) {
+            consolidatedIncidents.push({
+                id: inc.id,
+                type: 'STRUCTURAL',
+                timestamp: inc.fechaCambio,
+                targetClass: {
+                    schoolName: inc.claseSemana.clase.escuela.nombre,
+                    subjectName: inc.claseSemana.clase.asignatura.nombre,
+                },
+                motivo: inc.motivo,
+                fechaCambio: inc.fechaCambio,
+                profesorSaliente: null,
+                profesorEntrante: null,
+                originClass: null
+            })
+            handledIds.add(inc.id)
+        }
+        // 2. Case: Substitution (Has Entrante)
+        else if (inc.profesorEntranteId) {
             // Check for associated Movement
             // Conditions:
             // 1. Same Teacher (Saliente of movement == Entrante of sub)
@@ -472,12 +490,13 @@ export async function getWeeklyIncidents(semanaId: string) {
                     schoolName: movementRecord.claseSemana.clase.escuela.nombre,
                     subjectName: movementRecord.claseSemana.clase.asignatura.nombre
                 } : null,
-                fechaCambio: inc.fechaCambio
+                fechaCambio: inc.fechaCambio,
+                motivo: inc.motivo
             })
 
             handledIds.add(inc.id)
         }
-        // Is it a standalone Absence? (No Entrante, Not "Movido")
+        // 3. Case: Simple Absence
         else if (!inc.motivo.includes('Movido')) {
             consolidatedIncidents.push({
                 id: inc.id,
@@ -491,26 +510,8 @@ export async function getWeeklyIncidents(semanaId: string) {
                 profesorSaliente: inc.profesorSaliente,
                 profesorEntrante: null,
                 originClass: null,
-                fechaCambio: inc.fechaCambio
-            })
-            handledIds.add(inc.id)
-        }
-        // Structural Changes (Config updates)
-        else if (!inc.profesorSalienteId && !inc.profesorEntranteId) {
-            consolidatedIncidents.push({
-                id: inc.id,
-                type: 'STRUCTURAL',
-                timestamp: inc.fechaCambio, // Use log time
-                targetClass: {
-                    schoolName: inc.claseSemana.clase.escuela.nombre,
-                    subjectName: inc.claseSemana.clase.asignatura.nombre,
-                    time: inc.claseSemana.clase.horaInicio
-                },
-                motivo: inc.motivo,
                 fechaCambio: inc.fechaCambio,
-                profesorSaliente: null,
-                profesorEntrante: null,
-                originClass: null
+                motivo: inc.motivo
             })
             handledIds.add(inc.id)
         }
@@ -615,7 +616,78 @@ export async function revertChange(registroId: string) {
                 })
             }
         }
-        // 2. If it's just a simple Absence record
+        // 2. Structural Change (Config updates)
+        else if (!registro.profesorSalienteId && !registro.profesorEntranteId && registro.motivo.startsWith('CONFIG:')) {
+            const rawParts = registro.motivo.replace('CONFIG:', '').split('||')
+            const claseId = registro.claseSemana.claseId
+
+            // Parsing and Inverting Loop
+            for (const part of rawParts) {
+                const text = part.trim()
+
+                // Case A: Revert Removal (Add Back) -> "[-] Name"
+                if (text.startsWith('[-]')) {
+                    const nameToAdd = text.replace('[-]', '').trim()
+                    try {
+                        const teacher = await tx.profesor.findFirst({ where: { nombre: nameToAdd } })
+                        if (teacher) {
+                            // Re-connect
+                            await tx.clase.update({
+                                where: { id: claseId },
+                                data: {
+                                    profesoresBase: {
+                                        connect: { id: teacher.id }
+                                    }
+                                }
+                            })
+                        }
+                    } catch (e) {
+                        // Safe Failure
+                    }
+                }
+
+                // Case B: Revert Addition (Remove) -> "[+] Name"
+                if (text.startsWith('[+]')) {
+                    const nameToRemove = text.replace('[+]', '').trim()
+                    try {
+                        const teacher = await tx.profesor.findFirst({ where: { nombre: nameToRemove } })
+                        if (teacher) {
+                            // Disconnect
+                            await tx.clase.update({
+                                where: { id: claseId },
+                                data: {
+                                    profesoresBase: {
+                                        disconnect: { id: teacher.id }
+                                    }
+                                }
+                            })
+                        }
+                    } catch (e) {
+                        // Safe Failure
+                    }
+                }
+
+                // Case C: Revert Minima -> "[MIN] Old -> New"
+                if (text.startsWith('[MIN]')) {
+                    // Extract Old value. Format: "[MIN] 1 -> 2"
+                    try {
+                        const parts = text.replace('[MIN]', '').split('→')
+                        if (parts.length === 2) {
+                            const oldValue = parseInt(parts[0].trim())
+                            if (!isNaN(oldValue)) {
+                                await tx.clase.update({
+                                    where: { id: claseId },
+                                    data: { profesoresMinimos: oldValue }
+                                })
+                            }
+                        }
+                    } catch (e) {
+                        // Safe Failure
+                    }
+                }
+            }
+        }
+        // 3. If it's just a simple Absence record
         else if (registro.profesorSalienteId) {
             const assignment = await tx.asignacionProfesor.findFirst({
                 where: {

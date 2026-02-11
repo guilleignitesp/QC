@@ -132,19 +132,26 @@ export async function updateClaseTemplate(
 
     // 3. Log Change if claseSemanaId is provided (Structural Log)
     if (claseSemanaId) {
-        // Build descriptive reason
         const changes = []
+
+        // MIN Changes
         if (currentClase.profesoresMinimos !== minProfesores) {
-            changes.push(`Mínimos: ${currentClase.profesoresMinimos} → ${minProfesores}`)
+            changes.push(`[MIN] ${currentClase.profesoresMinimos} → ${minProfesores}`)
         }
 
-        const oldIds = currentClase.profesoresBase.map(p => p.id).sort().join(',')
-        const newIds = profesoresBaseIds.sort().join(',')
+        // REMOVALS: Present in Old but NOT in New
+        const removedTeachers = currentClase.profesoresBase.filter(p => !profesoresBaseIds.includes(p.id))
+        removedTeachers.forEach(p => {
+            changes.push(`[-] ${p.nombre}`)
+        })
 
-        if (oldIds !== newIds) {
-            const newNames = updatedClase.profesoresBase.map(p => p.nombre).join(', ')
-            changes.push(`Plantilla: ${newNames}`)
-        }
+        // ADDITIONS: Present in New but NOT in Old
+        // We use updatedClase to get the names of the new ones
+        const oldIds = currentClase.profesoresBase.map(p => p.id)
+        const addedTeachers = updatedClase.profesoresBase.filter(p => !oldIds.includes(p.id))
+        addedTeachers.forEach(p => {
+            changes.push(`[+] ${p.nombre}`)
+        })
 
         if (changes.length > 0) {
             await db.registroCambio.create({
@@ -152,7 +159,7 @@ export async function updateClaseTemplate(
                     claseSemanaId: claseSemanaId,
                     profesorSalienteId: null, // Structural
                     profesorEntranteId: null, // Structural
-                    motivo: `CONFIG: ${changes.join(' | ')}`,
+                    motivo: `CONFIG: ${changes.join(' || ')}`,
                     fechaCambio: new Date()
                 }
             })
