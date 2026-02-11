@@ -90,11 +90,15 @@ export async function getSubstitutionCandidates(
         const currentStart = getMinutesInDay(cs.clase.horaInicio)
         const currentEnd = getMinutesInDay(cs.clase.horaFin)
 
-        // 60-Minute Travel Buffer Check
+        // Dynamic Travel Buffer Check
+        // If same school, buffer is 0. If different, 60 mins.
+        const isSameSchool = target.clase.escuelaId === cs.clase.escuelaId
+        const currentBuffer = isSameSchool ? 0 : 60
+
         // Teachers are considered "Busy" if they have a class overlapping the target slot
-        // OR if they have a class within 60 minutes before/after the target slot.
-        // Formula: Target overlaps (CurrentStart - 60) to (CurrentEnd + 60)
-        return Math.max(targetStart, currentStart - 60) < Math.min(targetEnd, currentEnd + 60)
+        // OR if they have a class within buffer minutes before/after the target slot.
+        // Formula: Target overlaps (CurrentStart - Buffer) to (CurrentEnd + Buffer)
+        return Math.max(targetStart, currentStart - currentBuffer) < Math.min(targetEnd, currentEnd + currentBuffer)
     })
 
     // 5. Build Maps
@@ -708,6 +712,55 @@ export async function revertChange(registroId: string) {
         // 3. Delete the Incident Record itself
         await tx.registroCambio.delete({
             where: { id: registroId }
+        })
+
+
+        return { success: true }
+    })
+}
+
+export async function markTeacherAsAbsent(
+    claseSemanaId: string,
+    profesorId: string
+) {
+    return await db.$transaction(async (tx) => {
+        // 1. Mark absent teacher as inactive in the target class
+        // Check if an assignment record exists
+        const existingAssignment = await tx.asignacionProfesor.findFirst({
+            where: {
+                claseSemanaId,
+                profesorId
+            }
+        })
+
+        if (existingAssignment) {
+            // Update existing record
+            await tx.asignacionProfesor.update({
+                where: { id: existingAssignment.id },
+                data: { activo: false }
+            })
+        } else {
+            // Create "Exception" record (Base teacher marked absent)
+            await tx.asignacionProfesor.create({
+                data: {
+                    claseSemanaId,
+                    profesorId,
+                    tipo: 'PERMANENTE', // They are still the perm teacher, just absent
+                    origen: 'BASE',
+                    activo: false
+                }
+            })
+        }
+
+        // 2. Log Change in Target Class
+        await tx.registroCambio.create({
+            data: {
+                claseSemanaId,
+                profesorSalienteId: profesorId,
+                profesorEntranteId: null,
+                motivo: 'Ausencia sin sustitución',
+                fechaCambio: new Date()
+            }
         })
 
         return { success: true }

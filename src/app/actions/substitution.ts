@@ -36,6 +36,22 @@ export async function applySubstitutionAction(
     }
 }
 
+import { markTeacherAsAbsent } from '@/services/substitution'
+
+export async function markStandaloneAbsenceAction(
+    claseSemanaId: string,
+    profesorId: string
+) {
+    try {
+        await markTeacherAsAbsent(claseSemanaId, profesorId)
+        revalidatePath('/dashboard')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Error marking absence:', error)
+        return { success: false, error: error.message }
+    }
+}
+
 import { getWeeklyIncidents, revertChange } from '@/services/substitution'
 
 export async function getIncidentsAction(semanaId: string) {
@@ -47,7 +63,18 @@ export async function getIncidentsAction(semanaId: string) {
     }
 }
 
-import { updateClaseTemplate, getAllTeachers, getAvailableTeachersForTemplate } from '@/services/schedule'
+import { updateClaseTemplate, getAllTeachers, getAvailableTeachersForTemplate, createTeacher } from '@/services/schedule'
+
+export async function createTeacherAction(nombre: string) {
+    try {
+        await createTeacher(nombre)
+        revalidatePath('/dashboard')
+        return { success: true }
+    } catch (error: any) {
+        console.error('Error creating teacher:', error)
+        return { success: false, error: error.message }
+    }
+}
 
 export async function getAllTeachersAction() {
     try {

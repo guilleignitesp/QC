@@ -1,37 +1,57 @@
 import { PrismaClient } from '@prisma/client'
-
 const prisma = new PrismaClient()
 
 async function main() {
-    console.log('⏳ Generando próximas 4 semanas...')
+    const TARGET_DATE = new Date('2026-06-19')
 
-    const clasesBase = await prisma.clase.findMany({
-        include: { asignatura: true, escuela: true }
+    // 1. Obtener todas las clases base con sus profesores template
+    const todasLasClases = await prisma.clase.findMany({
+        include: { profesoresBase: true }
+    })
+    if (todasLasClases.length === 0) {
+        console.error("❌ No hay clases base en la BD. Crea primero las clases.")
+        return
+    }
+
+    // 2. Buscar la última semana registrada
+    const ultimaSemana = await prisma.semana.findFirst({
+        orderBy: { fechaInicio: 'desc' }
     })
 
-    const profesores = await prisma.profesor.findMany()
+    let fechaInicio: Date
+    if (ultimaSemana) {
+        fechaInicio = new Date(ultimaSemana.fechaInicio)
+        fechaInicio.setDate(fechaInicio.getDate() + 7) // Saltar al siguiente lunes
+    } else {
+        // Si no hay nada, buscamos el lunes de esta semana actual
+        fechaInicio = new Date()
+        const day = fechaInicio.getDay()
+        const diff = fechaInicio.getDate() - day + (day === 0 ? -6 : 1)
+        fechaInicio.setDate(diff)
+    }
 
-    // Fecha de inicio de la siguiente semana (9 de Febrero 2026)
-    let fechaInicioRef = new Date('2026-02-09T00:00:00.000Z')
+    // Resetear horas para evitar problemas de desfase
+    fechaInicio.setUTCHours(0, 0, 0, 0)
 
-    for (let i = 0; i < 4; i++) {
-        const fechaFinRef = new Date(fechaInicioRef)
-        fechaFinRef.setDate(fechaFinRef.getDate() + 6)
-        fechaFinRef.setUTCHours(23, 59, 59, 999)
+    console.log(`🚀 Generando semanas laborables (L-V) hasta junio 2026...`)
 
-        // 1. Crear la Semana
+    while (fechaInicio <= TARGET_DATE) {
+        // Calcular el viernes de esa misma semana (Lunes + 4 días)
+        const fechaFin = new Date(fechaInicio)
+        fechaFin.setDate(fechaInicio.getDate() + 4)
+        fechaFin.setUTCHours(23, 59, 59, 999)
+
+        // Crear el registro de la Semana
         const nuevaSemana = await prisma.semana.create({
             data: {
-                fechaInicio: fechaInicioRef,
-                fechaFin: fechaFinRef,
-                activa: false // Solo una debe ser activa, la actual
+                fechaInicio: new Date(fechaInicio),
+                fechaFin: new Date(fechaFin),
+                activa: false
             }
         })
 
-        console.log(`✅ Semana creada: ${fechaInicioRef.toISOString().split('T')[0]}`)
-
-        // 2. Crear ClaseSemana y Asignaciones para cada clase base
-        for (const clase of clasesBase) {
+        // Vincular cada clase y "CONGELAR" sus profesores
+        for (const clase of todasLasClases) {
             const cs = await prisma.claseSemana.create({
                 data: {
                     claseId: clase.id,
@@ -40,28 +60,32 @@ async function main() {
                 }
             })
 
-            // Asignar 1 profesor aleatorio como PERMANENTE (para tener datos)
-            const profeAleatorio = profesores[Math.floor(Math.random() * profesores.length)]
-
-            await prisma.asignacionProfesor.create({
-                data: {
-                    profesorId: profeAleatorio.id,
+            // Crear Asignaciones PERMANENTES basadas en el Template actual
+            if (clase.profesoresBase.length > 0) {
+                const asignaciones = clase.profesoresBase.map(profe => ({
                     claseSemanaId: cs.id,
+                    profesorId: profe.id,
                     tipo: 'PERMANENTE',
                     origen: 'BASE',
                     activo: true
-                }
-            })
+                }))
+
+                // Tipado manual para evitar conflicto con la cadena literal vs string
+                await prisma.asignacionProfesor.createMany({
+                    data: asignaciones as any
+                })
+            }
         }
 
-        // Avanzar la referencia 7 días para la siguiente iteración
-        fechaInicioRef = new Date(fechaInicioRef)
-        fechaInicioRef.setDate(fechaInicioRef.getDate() + 7)
+        console.log(`✅ Creada: Lunes ${fechaInicio.toLocaleDateString()} -> Viernes ${fechaFin.toLocaleDateString()}`)
+
+        // Avanzar 7 días para el próximo lunes
+        fechaInicio.setDate(fechaInicio.getDate() + 7)
     }
 
-    console.log('🚀 ¡4 semanas adicionales generadas con éxito!')
+    console.log("✨ ¡Semanas generadas correctamente!")
 }
 
 main()
-    .catch((e) => console.error(e))
+    .catch(e => console.error(e))
     .finally(async () => await prisma.$disconnect())

@@ -2,21 +2,17 @@ import db from '@/lib/db'
 
 export async function getWeeklySchedule(semanaId: string) {
     const rawSchedule = await db.claseSemana.findMany({
-        where: {
-            semanaId: semanaId,
-        },
+        where: { semanaId: semanaId },
         include: {
             clase: {
                 include: {
                     escuela: true,
                     asignatura: true,
-                    profesoresBase: true, // Fetch Template
+                    profesoresBase: true,
                 },
             },
             asignacionesProfesor: {
-                include: {
-                    profesor: true,
-                },
+                include: { profesor: true },
             },
         },
         orderBy: [
@@ -25,36 +21,43 @@ export async function getWeeklySchedule(semanaId: string) {
         ],
     })
 
-    // Transform Logic: Merge Template + Exceptions
     const schedule = rawSchedule.map(cs => {
-        const baseTeachers = cs.clase.profesoresBase
-        const exceptions = cs.asignacionesProfesor // TEMPORAL or Inactive records
+        const allAssignments = cs.asignacionesProfesor
 
-        // 1. Start with Base Teachers
-        // Check if any Base Teacher has a matching Exception (moved/absent)
-        const mergedAssignments = baseTeachers.map(base => {
-            // Can be marked inactive by a specific record in asignacionesProfesor
-            const exception = exceptions.find(e => e.profesorId === base.id && e.origen === 'BASE')
+        // 1. Get Permanent Assignments from this specific Week Instance (Frozen Data)
+        const permanentInInstance = allAssignments.filter(
+            a => a.tipo === 'PERMANENTE' && a.origen === 'BASE'
+        )
 
-            // If explicit exception says "activo: false", respect it.
-            // If no exception found, they are ACTIVE by default (Template behavior)
-            const isActive = exception ? exception.activo : true
+        let baseTeachersFormatted: any[] = []
 
-            return {
-                id: exception?.id || `base-${base.id}`, // Virtual ID if no exception record exists
-                profesorId: base.id,
-                profesor: base,
+        if (permanentInInstance.length > 0) {
+            // Use the "Frozen" teachers for this week
+            baseTeachersFormatted = permanentInInstance.map(a => ({
+                id: a.id,
+                profesorId: a.profesorId,
+                profesor: a.profesor,
                 tipo: 'PERMANENTE',
                 origen: 'BASE',
-                activo: isActive
-            }
-        })
+                activo: a.activo
+            }))
+        } else {
+            // Fallback for old weeks without frozen data: Use the Master Template
+            baseTeachersFormatted = cs.clase.profesoresBase.map(p => ({
+                id: `base-${p.id}`,
+                profesorId: p.id,
+                profesor: p,
+                tipo: 'PERMANENTE',
+                origen: 'BASE',
+                activo: true
+            }))
+        }
 
-        // 2. Add Substitutes (Temporal assignments)
-        const substitutes = exceptions.filter(e => e.tipo === 'TEMPORAL')
+        // 2. Get Temporal Assignments (Substitutions)
+        const substitutes = allAssignments.filter(a => a.tipo === 'TEMPORAL')
 
-        // Combine arrays
-        const finalAssignments = [...mergedAssignments, ...substitutes]
+        // 3. Merge both to get the final staff for this class this week
+        const finalAssignments = [...baseTeachersFormatted, ...substitutes]
 
         return {
             ...cs,
@@ -100,6 +103,19 @@ export async function getAllTeachers() {
         where: { activo: true },
         orderBy: { nombre: 'asc' }
     })
+    return await db.profesor.findMany({
+        where: { activo: true },
+        orderBy: { nombre: 'asc' }
+    })
+}
+
+export async function createTeacher(nombre: string) {
+    return await db.profesor.create({
+        data: {
+            nombre,
+            activo: true
+        }
+    })
 }
 
 // 1. Fetch current state to compare
@@ -130,39 +146,101 @@ export async function updateClaseTemplate(
         }
     })
 
-    // 3. Log Change if claseSemanaId is provided (Structural Log)
+    // 4. Forward Propagation & Logging (Temporal Versioning)
     if (claseSemanaId) {
-        const changes = []
-
-        // MIN Changes
-        if (currentClase.profesoresMinimos !== minProfesores) {
-            changes.push(`[MIN] ${currentClase.profesoresMinimos} → ${minProfesores}`)
-        }
-
-        // REMOVALS: Present in Old but NOT in New
-        const removedTeachers = currentClase.profesoresBase.filter(p => !profesoresBaseIds.includes(p.id))
-        removedTeachers.forEach(p => {
-            changes.push(`[-] ${p.nombre}`)
+        // Find context week
+        const contextSemana = await db.claseSemana.findUnique({
+            where: { id: claseSemanaId },
+            include: {
+                semana: true,
+                asignacionesProfesor: {
+                    where: { tipo: 'PERMANENTE', origen: 'BASE' },
+                    include: { profesor: true }
+                }
+            }
         })
 
-        // ADDITIONS: Present in New but NOT in Old
-        // We use updatedClase to get the names of the new ones
-        const oldIds = currentClase.profesoresBase.map(p => p.id)
-        const addedTeachers = updatedClase.profesoresBase.filter(p => !oldIds.includes(p.id))
-        addedTeachers.forEach(p => {
-            changes.push(`[+] ${p.nombre}`)
-        })
+        if (contextSemana) {
+            // --- LOGGING ---
+            const changes = []
 
-        if (changes.length > 0) {
-            await db.registroCambio.create({
-                data: {
-                    claseSemanaId: claseSemanaId,
-                    profesorSalienteId: null, // Structural
-                    profesorEntranteId: null, // Structural
-                    motivo: `CONFIG: ${changes.join(' || ')}`,
-                    fechaCambio: new Date()
+            // Compare NEW Selection vs CURRENT WEEK State
+
+            // Old Identifiers (from this specific week)
+            const oldIds = contextSemana.asignacionesProfesor.map(a => a.profesorId)
+
+            // New Identifiers (from input)
+            const newIds = profesoresBaseIds
+
+            // REMOVED: In Old but not in New
+            const removed = contextSemana.asignacionesProfesor.filter(a => !newIds.includes(a.profesorId))
+            removed.forEach(r => changes.push(`[-] ${r.profesor.nombre}`))
+
+            // ADDED: In New but not in Old
+            // We need names for new IDs. We can find them in the updatedClase result or perform a quick lookup?
+            // `updatedClase` contains the NEW names.
+            const addedTeachers = updatedClase.profesoresBase.filter(p => !oldIds.includes(p.id))
+            addedTeachers.forEach(p => changes.push(`[+] ${p.nombre}`))
+
+            // MIN Changes
+            if (currentClase.profesoresMinimos !== minProfesores) {
+                changes.push(`[MIN] ${currentClase.profesoresMinimos} → ${minProfesores}`)
+            }
+
+            if (changes.length > 0) {
+                await db.registroCambio.create({
+                    data: {
+                        claseSemanaId: claseSemanaId,
+                        profesorSalienteId: null,
+                        profesorEntranteId: null,
+                        motivo: `CONFIG: ${changes.join(' || ')}`,
+                        fechaCambio: new Date()
+                    }
+                })
+            }
+
+            // --- PROPAGATION ---
+            const startDate = contextSemana.semana.fechaInicio
+
+            // Find all FUTURE weeks for this class (including current)
+            const futureWeeks = await db.claseSemana.findMany({
+                where: {
+                    claseId: claseId,
+                    semana: {
+                        fechaInicio: {
+                            gte: startDate
+                        }
+                    }
                 }
             })
+
+            // Propagate changes
+            for (const fw of futureWeeks) {
+                // 1. Clear old BASE assignments
+                await db.asignacionProfesor.deleteMany({
+                    where: {
+                        claseSemanaId: fw.id,
+                        tipo: 'PERMANENTE',
+                        origen: 'BASE'
+                    }
+                })
+
+                // 2. Create new BASE assignments
+                // Using updatedClase.profesoresBase
+                const newAssignments = updatedClase.profesoresBase.map(p => ({
+                    claseSemanaId: fw.id,
+                    profesorId: p.id,
+                    tipo: 'PERMANENTE',
+                    origen: 'BASE',
+                    activo: true
+                }))
+
+                if (newAssignments.length > 0) {
+                    await db.asignacionProfesor.createMany({
+                        data: newAssignments
+                    })
+                }
+            }
         }
     }
 
@@ -212,9 +290,16 @@ export async function getAvailableTeachersForTemplate(claseId: string) {
         const otherStart = getMins(other.horaInicio)
         const otherEnd = getMins(other.horaFin)
 
-        // Buffered Overlap Check (60 mins)
-        // Overlap if: TargetStart < OtherEnd + 60 AND TargetEnd > OtherStart - 60
-        if (targetStart < otherEnd + 60 && targetEnd > otherStart - 60) {
+        // Buffered Overlap Check (Dynamic)
+        const isSameSchool = target.escuelaId === other.escuelaId
+        const currentBuffer = isSameSchool ? 0 : 60
+
+        // Overlap if: TargetStart < OtherEnd + Buffer AND TargetEnd > OtherStart - Buffer
+        // This covers:
+        // 1. Direct overlap
+        // 2. Proximity within buffer (travel time)
+        // 3. Consecutive classes in same school (buffer 0) allow end==start
+        if (targetStart < otherEnd + currentBuffer && targetEnd > otherStart - currentBuffer) {
 
             // Teachers in this class are busy
             for (const teacher of other.profesoresBase) {

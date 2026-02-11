@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { getCandidatesAction, applySubstitutionAction, updateTemplateAction, getAllTeachersAction, getTemplateCandidatesAction } from '@/app/actions/substitution'
-import { X, User, AlertCircle, CheckCircle, Loader2, Settings, Users, Save, Clock } from 'lucide-react'
+import { getCandidatesAction, applySubstitutionAction, updateTemplateAction, getAllTeachersAction, getTemplateCandidatesAction, markStandaloneAbsenceAction } from '@/app/actions/substitution'
+import { X, User, AlertCircle, CheckCircle, Loader2, Settings, Users, Save, Clock, UserX } from 'lucide-react'
 
 type Props = {
     isOpen: boolean
@@ -39,8 +39,22 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
             // Initialize Settings from Props
             if (claseSemana?.clase) {
                 setMinTeachers(claseSemana.clase.profesoresMinimos || 1)
-                // Extract IDs from profesoresBase (Template)
-                const baseIds = claseSemana.clase.profesoresBase?.map((p: any) => p.id) || []
+
+                // NEW LOGIC: Prioritize Frozen Assignments (Temporal Versioning)
+                const frozenAssignments = claseSemana.asignacionesProfesor?.filter(
+                    (a: any) => a.tipo === 'PERMANENTE' && a.origen === 'BASE'
+                )
+
+                let baseIds: string[] = []
+
+                if (frozenAssignments && frozenAssignments.length > 0) {
+                    // Use Frozen Data
+                    baseIds = frozenAssignments.map((a: any) => a.profesorId)
+                } else {
+                    // Fallback to Master Template
+                    baseIds = claseSemana.clase.profesoresBase?.map((p: any) => p.id) || []
+                }
+
                 setSelectedBaseIds(baseIds)
             }
 
@@ -87,6 +101,27 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
             alert('Failed: ' + (res.error || 'Unknown error'))
         }
         setProcessing(null)
+    }
+
+    const handleStandaloneAbsence = async () => {
+        if (!selectedAbsentId) return
+        setProcessing('standalone')
+
+        const res = await markStandaloneAbsenceAction(claseSemana.id, selectedAbsentId)
+
+        if (res.success) {
+            setSuccess(true)
+            setTimeout(() => {
+                onClose()
+                setSuccess(false)
+                setSelectedAbsentId(null)
+                setCandidates(null)
+                setProcessing(null)
+            }, 1000)
+        } else {
+            alert('Failed: ' + res.error)
+            setProcessing(null)
+        }
     }
 
     // --- TEMPLATE HANDLERS ---
@@ -255,6 +290,20 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
                                                 </div>
                                             )}
                                         </div>
+
+                                        {/* Step 1.5: Standalone Absence Button */}
+                                        {selectedAbsentId && (
+                                            <div className="mt-3 animate-in fade-in slide-in-from-top-2">
+                                                <button
+                                                    onClick={handleStandaloneAbsence}
+                                                    disabled={!!processing}
+                                                    className="w-full flex items-center justify-center gap-2 p-3 rounded-xl border border-rose-200 text-rose-700 font-bold text-sm bg-rose-50 hover:bg-rose-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {processing === 'standalone' ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserX className="w-4 h-4" />}
+                                                    Marcar como ausente (Sin sustituto)
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Step 2: Candidates */}

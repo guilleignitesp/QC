@@ -2,9 +2,10 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { createTeacherAction } from '@/app/actions/substitution'
 import DashboardMatrix from './DashboardMatrix'
 import SubstitutionDrawer from './SubstitutionDrawer'
-import { Search, Bell, Settings, Menu, ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
+import { Search, Bell, Settings, Menu, ChevronLeft, ChevronRight, Calendar, UserPlus, X, Loader2 } from 'lucide-react'
 
 import IncidenciasPanel from './IncidenciasPanel'
 
@@ -20,6 +21,9 @@ type Props = {
 export default function DashboardClient({ schools, matrix, activeWeek, allWeeks, incidents = [] }: Props) {
     const [selectedClass, setSelectedClass] = useState<any>(null)
     const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+    const [newTeacherName, setNewTeacherName] = useState('')
+    const [isSaving, setIsSaving] = useState(false)
     const router = useRouter()
 
     const handleClassClick = (claseSemana: any) => {
@@ -29,6 +33,21 @@ export default function DashboardClient({ schools, matrix, activeWeek, allWeeks,
 
     const handleCloseDrawer = () => {
         setIsDrawerOpen(false)
+    }
+
+    const handleAddTeacher = async () => {
+        if (!newTeacherName.trim()) return
+        setIsSaving(true)
+        const res = await createTeacherAction(newTeacherName)
+        setIsSaving(false)
+
+        if (res.success) {
+            setIsAddModalOpen(false)
+            setNewTeacherName('')
+            router.refresh()
+        } else {
+            alert('Error al crear profesor: ' + res.error)
+        }
     }
 
     const changeWeek = (direction: 'next' | 'prev') => {
@@ -89,6 +108,16 @@ export default function DashboardClient({ schools, matrix, activeWeek, allWeeks,
                             <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
+
+                    <div className="ml-4">
+                        <button
+                            onClick={() => setIsAddModalOpen(true)}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold py-2 px-3 rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                        >
+                            <span className="text-lg leading-none">+</span>
+                            Añadir Profesor
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -136,6 +165,76 @@ export default function DashboardClient({ schools, matrix, activeWeek, allWeeks,
                     claseSemana={selectedClass}
                     currentTeachers={selectedClass.asignacionesProfesor}
                 />
+            )}
+
+            {/* Add Teacher Modal */}
+            {isAddModalOpen && (
+                <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                        {/* Header */}
+                        <div className="bg-indigo-600 px-6 py-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3 text-white">
+                                <div className="p-2 bg-white/20 rounded-lg">
+                                    <UserPlus className="w-5 h-5" />
+                                </div>
+                                <h3 className="text-lg font-bold">Nuevo Profesor</h3>
+                            </div>
+                            <button
+                                onClick={() => setIsAddModalOpen(false)}
+                                className="text-indigo-100 hover:text-white hover:bg-indigo-500/50 p-1.5 rounded-full transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Body */}
+                        <div className="p-6">
+                            <label className="block text-sm font-medium text-slate-700 mb-2">
+                                Nombre del Profesor
+                            </label>
+                            <input
+                                type="text"
+                                autoFocus
+                                value={newTeacherName}
+                                onChange={(e) => setNewTeacherName(e.target.value)}
+                                placeholder="Ej. Juan Pérez"
+                                className="w-full p-3 border-2 border-slate-100 rounded-xl focus:border-indigo-500 focus:ring-0 outline-none transition-all text-slate-800 placeholder:text-slate-400 font-medium"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleAddTeacher()
+                                    if (e.key === 'Escape') setIsAddModalOpen(false)
+                                }}
+                            />
+                            <p className="mt-2 text-xs text-slate-400">
+                                El profesor se añadirá como &quot;Activo&quot; y estará disponible inmediatamente.
+                            </p>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="bg-slate-50 px-6 py-4 flex items-center justify-end gap-3 border-t border-slate-100">
+                            <button
+                                onClick={() => setIsAddModalOpen(false)}
+                                disabled={isSaving}
+                                className="px-4 py-2 text-sm font-bold text-slate-600 hover:text-slate-800 hover:bg-slate-200/50 rounded-lg transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleAddTeacher}
+                                disabled={!newTeacherName.trim() || isSaving}
+                                className="px-4 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2"
+                            >
+                                {isSaving ? (
+                                    <>
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        Creando...
+                                    </>
+                                ) : (
+                                    'Crear Profesor'
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     )
