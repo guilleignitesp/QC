@@ -90,7 +90,11 @@ export async function getSubstitutionCandidates(
         const currentStart = getMinutesInDay(cs.clase.horaInicio)
         const currentEnd = getMinutesInDay(cs.clase.horaFin)
 
-        return Math.max(targetStart, currentStart) < Math.min(targetEnd, currentEnd)
+        // 60-Minute Travel Buffer Check
+        // Teachers are considered "Busy" if they have a class overlapping the target slot
+        // OR if they have a class within 60 minutes before/after the target slot.
+        // Formula: Target overlaps (CurrentStart - 60) to (CurrentEnd + 60)
+        return Math.max(targetStart, currentStart - 60) < Math.min(targetEnd, currentEnd + 60)
     })
 
     // 5. Build Maps
