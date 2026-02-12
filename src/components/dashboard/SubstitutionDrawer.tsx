@@ -61,7 +61,7 @@ export default function SubstitutionDrawer({ isOpen, onClose, claseSemana, curre
             // Load All Teachers for Settings
             // Load Template Candidates (with conflict info)
             getTemplateCandidatesAction(claseSemana.clase.id).then(res => {
-                if (res.success) setAllTeachers(res.data)
+                if (res.success) setAllTeachers(res.data || [])
             })
         }
     }, [isOpen, claseSemana?.id])
