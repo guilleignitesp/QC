@@ -513,7 +513,7 @@ export async function getWeeklyIncidents(semanaId: string) {
             handledIds.add(inc.id)
         }
         // 3. Case: Simple Absence
-        else if (!inc.motivo.includes('Movido')) {
+        else if (!inc.motivo?.includes('Movido')) {
             consolidatedIncidents.push({
                 id: inc.id,
                 type: 'ABSENCE',
@@ -629,7 +629,7 @@ export async function revertChange(registroId: string) {
             }
         }
         // 2. Structural Change (Config updates)
-        else if (!registro.profesorSalienteId && !registro.profesorEntranteId && registro.motivo.startsWith('CONFIG:')) {
+        else if (!registro.profesorSalienteId && !registro.profesorEntranteId && registro.motivo && registro.motivo.startsWith('CONFIG:')) {
             try {
                 // 1. Parse Details
                 const rawParts = registro.motivo.replace('CONFIG:', '').split('||')
