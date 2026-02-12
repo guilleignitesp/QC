@@ -24,7 +24,8 @@ export async function applySubstitutionAction(
         revalidatePath('/dashboard') // Refresh dashboard data immediately
 
         // Ensure we return a clean object as requested
-        const teacherName = result?.profesor?.nombre || 'Profesor'
+        const anyResult = result as any;
+        const teacherName = anyResult?.profesor?.nombre || 'Profesor';
         return {
             success: true,
             teacherName,
