@@ -142,7 +142,7 @@ export default function DashboardClient({ schools, matrix, activeWeek, allWeeks,
             <div className="flex-1 overflow-hidden flex flex-col relative">
 
                 {/* Scrollable Matrix + Incidents */}
-                <div className="flex-1 overflow-auto bg-slate-50/50 pb-20">
+                <div className="flex-1 overflow-auto bg-slate-50/50 pb-20 relative scrollbar-thin scrollbar-thumb-blue-200 scrollbar-track-transparent h-full">
                     <DashboardMatrix
                         schools={schools}
                         matrix={matrix}
