@@ -481,7 +481,7 @@ export async function getWeeklyIncidents(semanaId: string) {
             const movementRecord = rawIncidents.find(r =>
                 !handledIds.has(r.id) &&
                 r.profesorSalienteId === subTeacherId &&
-                r.motivo.includes('Movido') &&
+                r.motivo?.includes('Movido') &&
                 Math.abs(getMinutesInDay(r.claseSemana.clase.horaInicio) - subTime) < 180 // Within 3 hours
             )
 
