@@ -125,126 +125,197 @@ export async function updateClaseTemplate(
     profesoresBaseIds: string[],
     claseSemanaId?: string // Optional context for Week View
 ) {
-    const currentClase = await db.clase.findUnique({
-        where: { id: claseId },
-        include: { profesoresBase: true }
-    })
+    return await db.$transaction(async (tx) => {
+        // 1. Get Current Master State & Context
+        const currentClase = await tx.clase.findUnique({
+            where: { id: claseId },
+            include: { profesoresBase: true }
+        })
 
-    if (!currentClase) throw new Error("Class not found")
+        if (!currentClase) throw new Error("Class not found")
 
-    // 2. Perform Update
-    const updatedClase = await db.clase.update({
-        where: { id: claseId },
-        data: {
-            profesoresMinimos: minProfesores,
-            profesoresBase: {
-                set: profesoresBaseIds.map(id => ({ id }))
-            }
-        },
-        include: {
-            profesoresBase: true // Get new names
-        }
-    })
+        // 2. SEAL THE PAST (Temporal Versioning)
+        // If we differ from the master, we must ensure PAST weeks have their own "Frozen" assignments
+        // before we change the Master they might be relying on.
+        if (claseSemanaId) {
+            const contextSemana = await tx.claseSemana.findUnique({
+                where: { id: claseSemanaId },
+                include: { semana: true }
+            })
 
-    // 4. Forward Propagation & Logging (Temporal Versioning)
-    if (claseSemanaId) {
-        // Find context week
-        const contextSemana = await db.claseSemana.findUnique({
-            where: { id: claseSemanaId },
-            include: {
-                semana: true,
-                asignacionesProfesor: {
-                    where: { tipo: 'PERMANENTE', origen: 'BASE' },
-                    include: { profesor: true }
+            if (contextSemana) {
+                const currentStartDate = contextSemana.semana.fechaInicio
+
+                // Find PAST weeks that rely on the Master (have NO permanent assignments)
+                const unsealedPastWeeks = await tx.claseSemana.findMany({
+                    where: {
+                        claseId: claseId,
+                        semana: {
+                            fechaInicio: { lt: currentStartDate }
+                        },
+                        asignacionesProfesor: {
+                            none: { tipo: 'PERMANENTE', origen: 'BASE' }
+                        }
+                    }
+                })
+
+                // Seal them! Create assignments based on the OLD Master
+                for (const pastWeek of unsealedPastWeeks) {
+                    const sealedAssignments = currentClase.profesoresBase.map(p => ({
+                        claseSemanaId: pastWeek.id,
+                        profesorId: p.id,
+                        tipo: 'PERMANENTE',
+                        origen: 'BASE',
+                        activo: true
+                    }))
+
+                    if (sealedAssignments.length > 0) {
+                        await tx.asignacionProfesor.createMany({
+                            data: sealedAssignments
+                        })
+                    }
                 }
+            }
+        }
+
+        // 3. Perform Master Update
+        const updatedClase = await tx.clase.update({
+            where: { id: claseId },
+            data: {
+                profesoresMinimos: minProfesores,
+                profesoresBase: {
+                    set: profesoresBaseIds.map(id => ({ id }))
+                }
+            },
+            include: {
+                profesoresBase: true // Get new names
             }
         })
 
-        if (contextSemana) {
-            // --- LOGGING ---
-            const changes = []
-
-            // Compare NEW Selection vs CURRENT WEEK State
-
-            // Old Identifiers (from this specific week)
-            const oldIds = contextSemana.asignacionesProfesor.map(a => a.profesorId)
-
-            // New Identifiers (from input)
-            const newIds = profesoresBaseIds
-
-            // REMOVED: In Old but not in New
-            const removed = contextSemana.asignacionesProfesor.filter(a => !newIds.includes(a.profesorId))
-            removed.forEach(r => changes.push(`[-] ${r.profesor.nombre}`))
-
-            // ADDED: In New but not in Old
-            // We need names for new IDs. We can find them in the updatedClase result or perform a quick lookup?
-            // `updatedClase` contains the NEW names.
-            const addedTeachers = updatedClase.profesoresBase.filter(p => !oldIds.includes(p.id))
-            addedTeachers.forEach(p => changes.push(`[+] ${p.nombre}`))
-
-            // MIN Changes
-            if (currentClase.profesoresMinimos !== minProfesores) {
-                changes.push(`[MIN] ${currentClase.profesoresMinimos} → ${minProfesores}`)
-            }
-
-            if (changes.length > 0) {
-                await db.registroCambio.create({
-                    data: {
-                        claseSemanaId: claseSemanaId,
-                        profesorSalienteId: null,
-                        profesorEntranteId: null,
-                        motivo: `CONFIG: ${changes.join(' || ')}`,
-                        fechaCambio: new Date()
-                    }
-                })
-            }
-
-            // --- PROPAGATION ---
-            const startDate = contextSemana.semana.fechaInicio
-
-            // Find all FUTURE weeks for this class (including current)
-            const futureWeeks = await db.claseSemana.findMany({
-                where: {
-                    claseId: claseId,
-                    semana: {
-                        fechaInicio: {
-                            gte: startDate
-                        }
+        // 4. Forward Propagation & Logging
+        if (claseSemanaId) {
+            // Find context week (Re-fetch inside tx for safety though we have it)
+            const contextSemana = await tx.claseSemana.findUnique({
+                where: { id: claseSemanaId },
+                include: {
+                    semana: true,
+                    asignacionesProfesor: {
+                        where: { tipo: 'PERMANENTE', origen: 'BASE' },
+                        include: { profesor: true }
                     }
                 }
             })
 
-            // Propagate changes
-            for (const fw of futureWeeks) {
-                // 1. Clear old BASE assignments
-                await db.asignacionProfesor.deleteMany({
+            if (contextSemana) {
+                // --- LOGGING ---
+                const changes: string[] = []
+
+                // Old Identifiers
+                let oldIds: string[] = []
+
+                // CRITICAL FIX: Ensure we only accept 'Active' weeks as having data? 
+                // No, sticking to "If it has assignments, use them. If not, fallback".
+                if (contextSemana.asignacionesProfesor.length > 0) {
+                    oldIds = contextSemana.asignacionesProfesor.map(a => a.profesorId)
+                } else {
+                    // Fallback to OLD Master (currentClase) because the week was empty/uninitialized
+                    oldIds = currentClase.profesoresBase.map(p => p.id)
+                }
+
+                // New Identifiers
+                const newIds = profesoresBaseIds
+
+                // Logic:
+                // Removed = In Old but not in New
+                // Added = In New but not in Old
+
+                // To get names for Removed, we need lookups
+                const removedIds = oldIds.filter(id => !newIds.includes(id))
+                for (const rId of removedIds) {
+                    const p = contextSemana.asignacionesProfesor.find(a => a.profesorId === rId)?.profesor
+                        || currentClase.profesoresBase.find(pb => pb.id === rId)
+                    if (p) changes.push(`[-] ${p.nombre}`)
+                }
+
+                // To get names for Added, use updatedClase
+                const addedIds = newIds.filter(id => !oldIds.includes(id))
+                for (const aId of addedIds) {
+                    const p = updatedClase.profesoresBase.find(pb => pb.id === aId)
+                    if (p) changes.push(`[+] ${p.nombre}`)
+                }
+
+                // MIN Changes
+                if (currentClase.profesoresMinimos !== minProfesores) {
+                    changes.push(`[MIN] ${currentClase.profesoresMinimos} → ${minProfesores}`)
+                }
+
+                if (changes.length > 0) {
+                    await tx.registroCambio.create({
+                        data: {
+                            claseSemanaId: claseSemanaId,
+                            profesorSalienteId: null,
+                            profesorEntranteId: null,
+                            motivo: `CONFIG: ${changes.join(' || ')}`,
+                            fechaCambio: new Date()
+                        }
+                    })
+                }
+
+                // --- PROPAGATION (Review) ---
+                // We want the Current Week and Future Weeks to reflect the NEW Master.
+                // Approach: Wipe 'BASE' assignments -> They will fall back to using the Master (which is now Updated).
+                // WAIT! If we wipe them, they use Master. That's the "Implicit" way.
+                // BUT, to be explicit and robust (and support exceptions later), we usually "Copy" the master.
+                // The user logic requested: "Perform one single deleteMany... and one single createMany".
+
+                const startDate = contextSemana.semana.fechaInicio
+
+                const futureWeeks = await tx.claseSemana.findMany({
                     where: {
-                        claseSemanaId: fw.id,
-                        tipo: 'PERMANENTE',
-                        origen: 'BASE'
+                        claseId: claseId,
+                        semana: {
+                            fechaInicio: { gte: startDate }
+                        }
                     }
                 })
+                const futureWeekIds = futureWeeks.map(fw => fw.id)
 
-                // 2. Create new BASE assignments
-                // Using updatedClase.profesoresBase
-                const newAssignments = updatedClase.profesoresBase.map(p => ({
-                    claseSemanaId: fw.id,
-                    profesorId: p.id,
-                    tipo: 'PERMANENTE',
-                    origen: 'BASE',
-                    activo: true
-                }))
-
-                if (newAssignments.length > 0) {
-                    await db.asignacionProfesor.createMany({
-                        data: newAssignments
+                if (futureWeekIds.length > 0) {
+                    // 1. Wipe Old Base Assignments
+                    await tx.asignacionProfesor.deleteMany({
+                        where: {
+                            claseSemanaId: { in: futureWeekIds },
+                            tipo: 'PERMANENTE',
+                            origen: 'BASE'
+                        }
                     })
+
+                    // 2. Create New Base Assignments (Explicit Propagation)
+                    // We must generate entries for EACH week x EACH teacher
+                    const newAssignments = []
+                    for (const wId of futureWeekIds) {
+                        for (const p of updatedClase.profesoresBase) {
+                            newAssignments.push({
+                                claseSemanaId: wId,
+                                profesorId: p.id,
+                                tipo: 'PERMANENTE',
+                                origen: 'BASE',
+                                activo: true
+                            })
+                        }
+                    }
+
+                    if (newAssignments.length > 0) {
+                        await tx.asignacionProfesor.createMany({
+                            data: newAssignments
+                        })
+                    }
                 }
             }
         }
-    }
 
-    return updatedClase
+        return updatedClase
+    })
 }
 
 export async function getAvailableTeachersForTemplate(claseId: string) {

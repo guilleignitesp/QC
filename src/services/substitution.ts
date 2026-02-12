@@ -403,6 +403,16 @@ export async function applySubstitution(
     })
 }
 
+export async function toggleIncidentConfirmation(
+    id: string,
+    status: boolean
+) {
+    return await db.registroCambio.update({
+        where: { id },
+        data: { confirmado: status }
+    })
+}
+
 export async function getWeeklyIncidents(semanaId: string) {
     const rawIncidents = await db.registroCambio.findMany({
         where: {
@@ -441,7 +451,7 @@ export async function getWeeklyIncidents(semanaId: string) {
             consolidatedIncidents.push({
                 id: inc.id,
                 type: 'STRUCTURAL',
-                timestamp: inc.fechaCambio,
+                timestamp: inc.fechaCambio, // Use Audit Time
                 targetClass: {
                     schoolName: inc.claseSemana.clase.escuela.nombre,
                     subjectName: inc.claseSemana.clase.asignatura.nombre,
@@ -450,7 +460,8 @@ export async function getWeeklyIncidents(semanaId: string) {
                 fechaCambio: inc.fechaCambio,
                 profesorSaliente: null,
                 profesorEntrante: null,
-                originClass: null
+                originClass: null,
+                confirmed: inc.confirmado
             })
             handledIds.add(inc.id)
         }
@@ -482,7 +493,7 @@ export async function getWeeklyIncidents(semanaId: string) {
             consolidatedIncidents.push({
                 id: inc.id, // Main ID for Revert
                 type: 'SUBSTITUTION',
-                timestamp: inc.claseSemana.clase.horaInicio,
+                timestamp: inc.fechaCambio, // Use Audit Time
                 targetClass: {
                     schoolName: inc.claseSemana.clase.escuela.nombre,
                     subjectName: inc.claseSemana.clase.asignatura.nombre,
@@ -495,7 +506,8 @@ export async function getWeeklyIncidents(semanaId: string) {
                     subjectName: movementRecord.claseSemana.clase.asignatura.nombre
                 } : null,
                 fechaCambio: inc.fechaCambio,
-                motivo: inc.motivo
+                motivo: inc.motivo,
+                confirmed: inc.confirmado
             })
 
             handledIds.add(inc.id)
@@ -505,7 +517,7 @@ export async function getWeeklyIncidents(semanaId: string) {
             consolidatedIncidents.push({
                 id: inc.id,
                 type: 'ABSENCE',
-                timestamp: inc.claseSemana.clase.horaInicio,
+                timestamp: inc.fechaCambio, // Use Audit Time
                 targetClass: {
                     schoolName: inc.claseSemana.clase.escuela.nombre,
                     subjectName: inc.claseSemana.clase.asignatura.nombre,
@@ -515,7 +527,8 @@ export async function getWeeklyIncidents(semanaId: string) {
                 profesorEntrante: null,
                 originClass: null,
                 fechaCambio: inc.fechaCambio,
-                motivo: inc.motivo
+                motivo: inc.motivo,
+                confirmed: inc.confirmado
             })
             handledIds.add(inc.id)
         }
@@ -579,9 +592,7 @@ export async function revertChange(registroId: string) {
             }
 
             // C. Smart Revert: Restore Substitute to Origin
-            // Look for "Movido" records for this teacher in the same week
             const currentDay = registro.claseSemana.clase.diaSemana
-
             const movedRecords = await tx.registroCambio.findMany({
                 where: {
                     profesorSalienteId: substituteId,
@@ -596,9 +607,7 @@ export async function revertChange(registroId: string) {
                 include: { claseSemana: { include: { clase: true } } }
             })
 
-            // Restore ALL found movements for this slot (Collision handling implies one, but be safe)
             for (const move of movedRecords) {
-                // Restore them in their origin class
                 const originAssignment = await tx.asignacionProfesor.findFirst({
                     where: {
                         claseSemanaId: move.claseSemanaId,
@@ -614,7 +623,6 @@ export async function revertChange(registroId: string) {
                     })
                 }
 
-                // Delete the movement log
                 await tx.registroCambio.delete({
                     where: { id: move.id }
                 })
@@ -622,59 +630,40 @@ export async function revertChange(registroId: string) {
         }
         // 2. Structural Change (Config updates)
         else if (!registro.profesorSalienteId && !registro.profesorEntranteId && registro.motivo.startsWith('CONFIG:')) {
-            const rawParts = registro.motivo.replace('CONFIG:', '').split('||')
-            const claseId = registro.claseSemana.claseId
+            try {
+                // 1. Parse Details
+                const rawParts = registro.motivo.replace('CONFIG:', '').split('||')
+                const claseId = registro.claseSemana.claseId
 
-            // Parsing and Inverting Loop
-            for (const part of rawParts) {
-                const text = part.trim()
+                // 2. Update Master Template FIRST (Atomic)
+                // We invert the logged actions.
+                for (const part of rawParts) {
+                    const text = part.trim()
 
-                // Case A: Revert Removal (Add Back) -> "[-] Name"
-                if (text.startsWith('[-]')) {
-                    const nameToAdd = text.replace('[-]', '').trim()
-                    try {
+                    // Case A: Revert Removal ([+] Add back) -> Logged as [-] Name
+                    if (text.startsWith('[-]')) {
+                        const nameToAdd = text.replace('[-]', '').trim()
                         const teacher = await tx.profesor.findFirst({ where: { nombre: nameToAdd } })
                         if (teacher) {
-                            // Re-connect
                             await tx.clase.update({
                                 where: { id: claseId },
-                                data: {
-                                    profesoresBase: {
-                                        connect: { id: teacher.id }
-                                    }
-                                }
+                                data: { profesoresBase: { connect: { id: teacher.id } } }
                             })
                         }
-                    } catch (e) {
-                        // Safe Failure
                     }
-                }
-
-                // Case B: Revert Addition (Remove) -> "[+] Name"
-                if (text.startsWith('[+]')) {
-                    const nameToRemove = text.replace('[+]', '').trim()
-                    try {
+                    // Case B: Revert Addition ([-] Remove) -> Logged as [+] Name
+                    else if (text.startsWith('[+]')) {
+                        const nameToRemove = text.replace('[+]', '').trim()
                         const teacher = await tx.profesor.findFirst({ where: { nombre: nameToRemove } })
                         if (teacher) {
-                            // Disconnect
                             await tx.clase.update({
                                 where: { id: claseId },
-                                data: {
-                                    profesoresBase: {
-                                        disconnect: { id: teacher.id }
-                                    }
-                                }
+                                data: { profesoresBase: { disconnect: { id: teacher.id } } }
                             })
                         }
-                    } catch (e) {
-                        // Safe Failure
                     }
-                }
-
-                // Case C: Revert Minima -> "[MIN] Old -> New"
-                if (text.startsWith('[MIN]')) {
-                    // Extract Old value. Format: "[MIN] 1 -> 2"
-                    try {
+                    // Case C: Revert Minima
+                    else if (text.startsWith('[MIN]')) {
                         const parts = text.replace('[MIN]', '').split('→')
                         if (parts.length === 2) {
                             const oldValue = parseInt(parts[0].trim())
@@ -685,10 +674,75 @@ export async function revertChange(registroId: string) {
                                 })
                             }
                         }
-                    } catch (e) {
-                        // Safe Failure
                     }
                 }
+
+                // 3. Propagate to Future (The Fix)
+                // Get the incident week ID to find start date
+                const incidentSemana = await tx.semana.findUnique({
+                    where: { id: registro.claseSemana.semanaId }
+                })
+
+                if (incidentSemana) {
+                    const startDate = new Date(incidentSemana.fechaInicio)
+                    startDate.setUTCHours(0, 0, 0, 0) // Normalize to start of day
+
+                    // Get the Corrected Master State
+                    const updatedMaster = await tx.clase.findUnique({
+                        where: { id: claseId },
+                        include: { profesoresBase: true }
+                    })
+
+                    if (updatedMaster) {
+                        // Find Valid Future Weeks 
+                        const futureWeeks = await tx.claseSemana.findMany({
+                            where: {
+                                claseId: claseId,
+                                semana: {
+                                    fechaInicio: { gte: startDate } // Strict GTE
+                                }
+                            }
+                        })
+                        const futureWeekIds = futureWeeks.map(fw => fw.id)
+
+                        if (futureWeekIds.length > 0) {
+                            // BATCH ACTION
+
+                            // A. Delete all PERMANENTE/BASE assignments in these weeks
+                            await tx.asignacionProfesor.deleteMany({
+                                where: {
+                                    claseSemanaId: { in: futureWeekIds },
+                                    tipo: 'PERMANENTE',
+                                    origen: 'BASE'
+                                }
+                            })
+
+                            // B. Create new assignments based on Updated Master
+                            const newAssignments = []
+                            for (const wId of futureWeekIds) {
+                                for (const p of updatedMaster.profesoresBase) {
+                                    newAssignments.push({
+                                        claseSemanaId: wId,
+                                        profesorId: p.id,
+                                        tipo: 'PERMANENTE',
+                                        origen: 'BASE',
+                                        activo: true
+                                    })
+                                }
+                            }
+
+                            if (newAssignments.length > 0) {
+                                await tx.asignacionProfesor.createMany({
+                                    data: newAssignments
+                                })
+                            }
+                        }
+                    }
+                }
+
+            } catch (e) {
+                console.error("Error reverting structural change:", e)
+                throw new Error("Failed to revert structural change safely.")
             }
         }
         // 3. If it's just a simple Absence record
@@ -709,11 +763,10 @@ export async function revertChange(registroId: string) {
             }
         }
 
-        // 3. Delete the Incident Record itself
+        // 4. Delete the Incident Record itself
         await tx.registroCambio.delete({
             where: { id: registroId }
         })
-
 
         return { success: true }
     })
@@ -776,7 +829,13 @@ export async function applyReinforcement(
         // Find if teacher has an active class at the same time to pull them from there
         const targetClass = await tx.claseSemana.findUnique({
             where: { id: claseSemanaId },
-            include: { clase: true }
+            include: {
+                clase: {
+                    include: {
+                        asignatura: true
+                    }
+                }
+            }
         })
         if (!targetClass) throw new Error("Target class not found")
 

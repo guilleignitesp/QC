@@ -1,18 +1,15 @@
-'use client'
-
 import { useState } from 'react'
-import { revertIncidentAction } from '@/app/actions/substitution'
-import { Trash2, Loader2, ArrowRight, Settings } from 'lucide-react'
+import { revertIncidentAction, toggleIncidentAction } from '@/app/actions/substitution'
+import { Trash2, Loader2, ArrowRight, Settings, Calendar, CheckCircle2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 
 type Props = {
     incidents: any[]
 }
 
-
-import { useRouter } from 'next/navigation'
-
 export default function IncidenciasPanel({ incidents }: Props) {
-    const [processing, setProcessing] = useState<string | null>(null)
+    const [processing, setProcessing] = useState<string | null>(null) // ID being reverted
+    const [toggling, setToggling] = useState<string | null>(null) // ID being toggled
     const router = useRouter()
 
     const handleRevert = async (id: string) => {
@@ -25,6 +22,14 @@ export default function IncidenciasPanel({ incidents }: Props) {
             router.refresh()
         }
         setProcessing(null)
+    }
+
+    const handleToggle = async (id: string, currentStatus: boolean) => {
+        setToggling(id)
+        await toggleIncidentAction(id, !currentStatus)
+        // No need to alert error, just refresh visually. Optimistic would be better but this is fine.
+        router.refresh()
+        setToggling(null)
     }
 
     if (!incidents || incidents.length === 0) {
@@ -54,22 +59,56 @@ export default function IncidenciasPanel({ incidents }: Props) {
                     const isSubstitution = inc.type === 'SUBSTITUTION'
                     const isRefuerzo = !inc.profesorSaliente && inc.profesorEntrante
                     const isStructural = inc.type === 'STRUCTURAL' || (!inc.profesorSaliente && !inc.profesorEntrante)
-                    const displayDate = inc.timestamp || inc.fechaCambio
-                    const time = displayDate ? new Date(displayDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
+                    const isConfirmed = !!inc.confirmed
+
+                    // Always use the main timestamp which is now guaranteed to be the Audit Time (fechaCambio)
+                    const displayDate = inc.timestamp
+                    const dateObj = displayDate ? new Date(displayDate) : null
+
+                    const time = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'
+                    const dateStr = dateObj ? dateObj.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }) : ''
 
                     if (!inc.targetClass) return null
 
                     return (
-                        <div key={inc.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center justify-between group">
-                            <div className="min-w-0 pr-4 flex-1">
-                                <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mb-2">
-                                    <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 border border-slate-200">
-                                        {inc.targetClass.schoolName}
-                                        {isStructural && ` - ${inc.targetClass.subjectName}`}
-                                    </span>
-                                    <span className="text-slate-400 font-medium tracking-wide">
-                                        {time}
-                                    </span>
+                        <div key={inc.id} className="p-4 hover:bg-slate-50 transition-colors flex items-center gap-3 group">
+
+                            {/* Confirmation Toggle */}
+                            <button
+                                onClick={() => handleToggle(inc.id, isConfirmed)}
+                                disabled={!!toggling}
+                                className={`flex-shrink-0 transition-all p-1 rounded-full ${isConfirmed
+                                        ? 'text-emerald-500 opacity-100 hover:bg-emerald-50'
+                                        : 'text-slate-400 opacity-100 hover:text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                title={isConfirmed ? "Confirmado (Click para deshacer)" : "Pendiente de confirmación"}
+                            >
+                                {toggling === inc.id ? (
+                                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                                ) : (
+                                    <CheckCircle2
+                                        className={`w-5 h-5 ${isConfirmed ? 'fill-emerald-50' : ''}`}
+                                    />
+                                )}
+                            </button>
+
+                            <div className="min-w-0 flex-1">
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                    <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+                                        <span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600 border border-slate-200">
+                                            {inc.targetClass.schoolName}
+                                            {isStructural && ` - ${inc.targetClass.subjectName}`}
+                                        </span>
+                                        {isConfirmed && (
+                                            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">
+                                                CONFIRMADO
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-500" title={`Registrado el ${dateStr} a las ${time}`}>
+                                        <Calendar className="w-3 h-3 text-slate-400" />
+                                        <span>{dateStr}, {time}</span>
+                                    </div>
                                 </div>
 
                                 {isStructural ? (

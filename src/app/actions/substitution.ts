@@ -144,3 +144,15 @@ export async function revertIncidentAction(registroId: string) {
         return { success: false, error: error.message }
     }
 }
+
+import { toggleIncidentConfirmation } from '@/services/substitution'
+
+export async function toggleIncidentAction(id: string, status: boolean) {
+    try {
+        await toggleIncidentConfirmation(id, status)
+        revalidatePath('/dashboard')
+        return { success: true }
+    } catch (error: any) {
+        return { success: false, error: error.message }
+    }
+}

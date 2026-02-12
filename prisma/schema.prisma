@@ -91,4 +91,5 @@ model RegistroCambio {
   claseSemana      ClaseSemana @relation(fields: [claseSemanaId], references: [id])
   profesorSaliente Profesor?   @relation("CambiosSaliente", fields: [profesorSalienteId], references: [id])
   profesorEntrante Profesor?   @relation("CambiosEntrante", fields: [profesorEntranteId], references: [id])
+  confirmado       Boolean     @default(false)
 }
