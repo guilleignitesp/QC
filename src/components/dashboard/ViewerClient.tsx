@@ -23,7 +23,7 @@ export default function ViewerClient({ schools, matrix, activeWeek, allWeeks }: 
         // Bounds check
         if (newIndex >= 0 && newIndex < allWeeks.length) {
             const nextWeek = allWeeks[newIndex]
-            router.push(`/dashboard/viewer?semanaId=${nextWeek.id}`)
+            router.push(`/viewer?semanaId=${nextWeek.id}`)
         }
     }
 
