@@ -35,10 +35,11 @@ function formatTime(dateStr: string | Date) {
 type Props = {
     schools: any[]
     matrix: Record<string, Record<number, any[]>>
-    onClassClick: (claseSemana: any) => void
+    onClassClick?: (claseSemana: any) => void
+    readOnly?: boolean
 }
 
-export default function DashboardMatrix({ schools, matrix, onClassClick }: Props) {
+export default function DashboardMatrix({ schools, matrix, onClassClick, readOnly = false }: Props) {
     return (
         <div className="min-w-fit">
             {/* Table Configuration: border-separate for sticky support */}
@@ -104,10 +105,16 @@ export default function DashboardMatrix({ schools, matrix, onClassClick }: Props
                                     return (
                                         <td key={`${school.id}-${day.id}`} className={`border-r border-t-[6px] border-blue-200 p-3 align-top h-48 relative hover:bg-black/[0.02] transition-colors ${rowBg}`}>
                                             {slots.length === 0 ? (
-                                                <div className="w-full h-full min-h-[160px] rounded-xl border-2 border-dashed border-slate-200/60 hover:border-slate-300 group-hover/cell flex flex-col items-center justify-center transition-all cursor-pointer opacity-40 hover:opacity-100">
-                                                    <Plus className="w-6 h-6 text-slate-300 mb-2" />
-                                                    <span className="text-xs font-medium text-slate-400">Add Class</span>
-                                                </div>
+                                                readOnly ? (
+                                                    <div className="w-full h-full min-h-[160px] rounded-xl border border-slate-100/30 flex items-center justify-center">
+                                                        <span className="text-slate-200">-</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="w-full h-full min-h-[160px] rounded-xl border-2 border-dashed border-slate-200/60 hover:border-slate-300 group-hover/cell flex flex-col items-center justify-center transition-all cursor-pointer opacity-40 hover:opacity-100">
+                                                        <Plus className="w-6 h-6 text-slate-300 mb-2" />
+                                                        <span className="text-xs font-medium text-slate-400">Add Class</span>
+                                                    </div>
+                                                )
                                             ) : (
                                                 <div className="flex flex-col gap-3">
                                                     {slots.map(slot => {
@@ -116,9 +123,11 @@ export default function DashboardMatrix({ schools, matrix, onClassClick }: Props
                                                         return (
                                                             <div
                                                                 key={slot.id}
-                                                                onClick={() => onClassClick(slot)}
+                                                                onClick={() => !readOnly && onClassClick && onClassClick(slot)}
                                                                 className={`relative rounded-xl border-l-[6px] border border-slate-100/50 shadow-sm p-3.5 transition-all duration-200 
-                                                                        hover:shadow-lg hover:-translate-y-1 cursor-pointer group/card bg-white ${styleClass}`}
+                                                                        bg-white ${styleClass}
+                                                                        ${!readOnly ? 'hover:shadow-lg hover:-translate-y-1 cursor-pointer group/card' : ''}
+                                                                `}
                                                             >
                                                                 {/* Header: Time Badge */}
                                                                 <div className="flex justify-between items-start mb-2">
@@ -191,11 +200,13 @@ export default function DashboardMatrix({ schools, matrix, onClassClick }: Props
                                                                 </div>
 
                                                                 {/* Edit Action (Visible on Hover) */}
-                                                                <div className="opacity-0 group-hover/card:opacity-100 transition-opacity absolute top-3 right-3 pointer-events-none">
-                                                                    <div className="p-1.5 rounded-full hover:bg-black/5 text-slate-400 pointer-events-auto">
-                                                                        <ChevronRight className="w-4 h-4" />
+                                                                {!readOnly && (
+                                                                    <div className="opacity-0 group-hover/card:opacity-100 transition-opacity absolute top-3 right-3 pointer-events-none">
+                                                                        <div className="p-1.5 rounded-full hover:bg-black/5 text-slate-400 pointer-events-auto">
+                                                                            <ChevronRight className="w-4 h-4" />
+                                                                        </div>
                                                                     </div>
-                                                                </div>
+                                                                )}
                                                             </div>
                                                         )
                                                     })}
